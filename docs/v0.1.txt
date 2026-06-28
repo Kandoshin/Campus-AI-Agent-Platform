@@ -1,0 +1,4 @@
+v0.1| Chat + SSE + FastAPI + React|
+完成项目基础框架搭建，实现前后端分离；
+支持用户与 LLM 对话；
+使用 SSE 实现流式输出，具备类似 ChatGPT 的实时回答体验。

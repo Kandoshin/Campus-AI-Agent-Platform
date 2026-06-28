@@ -1,0 +1,25 @@
+# ========================
+# 后端 (Python/FastAPI)
+# ========================
+backend/venv/
+backend/.env
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+# ========================
+# 前端 (React/Vite)
+# ========================
+frontend/node_modules/
+frontend/dist/
+frontend/.eslintcache
+
+frontend/.vite/
+frontend/.vite-temp/
+# ========================
+# IDE & 操作系统
+# ========================
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
