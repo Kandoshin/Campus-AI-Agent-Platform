@@ -23,3 +23,5 @@ frontend/.vite-temp/
 .vscode/
 .DS_Store
 Thumbs.db
+
+docs/
