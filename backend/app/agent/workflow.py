@@ -1,15 +1,15 @@
-# backend/app/agent/workflow.py
-import os
 from typing import Literal, Dict, Any
 
-from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 # 1. 引入内置的 MessagesState
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import ToolNode
-load_dotenv()
-# 导入我们的工具
+
+from app.core.config import settings
+# 导入我们的基础工具
 from app.tools import basic_tools
+# 导入校园知识库检索工具
+from app.tools.knowledge_tools import query_campus_knowledge_base
 
 # ==========================================
 # 1. 状态定义
@@ -21,13 +21,17 @@ from app.tools import basic_tools
 # 2. 初始化模型并绑定工具
 # ==========================================
 llm = ChatOpenAI(
-    model=os.environ.get("OPENAI_DEFAULT_MODEL", "deepseek-chat"),
-    base_url=os.environ.get("OPENAI_API_BASE", "http://localhost:3000/v1"),
-    api_key=os.environ.get("OPENAI_API_KEY"),
+    model=settings.openai_default_model,
+    base_url=settings.openai_api_base,
+    api_key=settings.openai_api_key,
     temperature=0
 )
 
-llm_with_tools = llm.bind_tools(basic_tools)
+# 将基础工具和 RAG 工具合并成一个新的工具列表
+all_tools = basic_tools + [query_campus_knowledge_base]
+
+# 修改：将合并后的完整工具集绑定给 LLM
+llm_with_tools = llm.bind_tools(all_tools)
 
 
 # ==========================================
@@ -41,8 +45,8 @@ def agent_node(state: MessagesState) -> Dict[str, Any]:
     response = llm_with_tools.invoke(state["messages"])
     return {"messages": [response]}
 
-
-tool_node = ToolNode(basic_tools)
+# 修改：ToolNode 也需要接收完整的工具集
+tool_node = ToolNode(all_tools)
 
 
 # ==========================================

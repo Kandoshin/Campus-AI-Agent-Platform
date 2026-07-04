@@ -88,8 +88,9 @@ function App() {
               else if (data.type === 'tool_start') {
                 // 工具开始调用：更新 UI 提示
                 const name = data.tool_name === 'simple_calculator' ? '计算器' :
-                             data.tool_name === 'get_current_time' ? '时间工具' : data.tool_name;
-                setToolStatus(`🛠️ 正在调用: ${name}...`);
+                             data.tool_name === 'get_current_time' ? '时间工具' :
+                             data.tool_name === 'query_campus_knowledge_base' ? '校园知识库' : data.tool_name;
+                setToolStatus(`正在调用: ${name}...`);
               }
               else if (data.type === 'tool_end') {
                 // 工具调用结束
@@ -104,7 +105,7 @@ function App() {
                   return updated;
                 });
               }
-            } catch (e) {
+            } catch {
               // 如果 JSON 依然无法解析，忽略这条残缺的数据
               console.warn("JSON parse error for stream chunk:", dataStr);
             }
@@ -123,7 +124,7 @@ function App() {
   return (
     <div className="flex flex-col h-screen bg-gray-50 max-w-4xl mx-auto border shadow-sm">
       <header className="p-4 bg-white border-b text-lg font-bold text-gray-800">
-        Enterprise AI Agent Platform - v0.2
+        Campus AI Agent Platform - v0.3
       </header>
 
       <main className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -154,7 +155,7 @@ function App() {
           <input
             type="text"
             className="flex-1 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="输入您的问题 (试着问：现在的系统时间是多少？)"
+            placeholder="输入校园服务问题，例如：学生手册里请假流程是什么？"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
