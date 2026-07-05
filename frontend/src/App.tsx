@@ -1,14 +1,27 @@
 // frontend/src/App.tsx
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+type UserRole = 'guest' | 'student' | 'admin';
+
+interface TraceSource {
+  title: string;
+  category: string;
+  page: string;
+  summary: string;
+}
+
+interface TraceItem {
+  message: string;
+  sources?: TraceSource[];
+}
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  traces?: TraceItem[];
 }
-
-type UserRole = 'guest' | 'student' | 'admin';
 
 interface AuthUser {
   id: number | null;
@@ -21,6 +34,29 @@ interface AuthUser {
 interface AuthResponse {
   access_token: string;
   user: AuthUser;
+}
+
+type AccessLevel = 'public' | 'student' | 'admin';
+type DocumentStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'deleted';
+
+interface KnowledgeDocument {
+  id: string;
+  title: string;
+  original_filename: string;
+  file_ext: string;
+  file_size: number;
+  content_type: string | null;
+  category: string;
+  access_level: AccessLevel;
+  storage_path: string;
+  status: DocumentStatus;
+  chunk_count: number;
+  uploaded_by_id: number | null;
+  uploaded_by_username: string;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
 }
 
 type IconName =
@@ -42,12 +78,6 @@ interface QuickPrompt {
   icon: IconName;
 }
 
-interface FeatureItem {
-  label: string;
-  value: string;
-  icon: IconName;
-}
-
 const TOKEN_STORAGE_KEY = 'campus_ai_access_token';
 
 const guestUser: AuthUser = {
@@ -62,6 +92,20 @@ const roleLabels: Record<UserRole, string> = {
   guest: '访客',
   student: '用户',
   admin: '管理员',
+};
+
+const accessLevelLabels: Record<AccessLevel, string> = {
+  public: '公开',
+  student: '学生',
+  admin: '管理员',
+};
+
+const documentStatusLabels: Record<DocumentStatus, string> = {
+  pending: '等待处理',
+  processing: '处理中',
+  completed: '已完成',
+  failed: '失败',
+  deleted: '已删除',
 };
 
 const quickPrompts: QuickPrompt[] = [
@@ -87,13 +131,23 @@ const quickPrompts: QuickPrompt[] = [
   },
 ];
 
-const features: FeatureItem[] = [
-  { label: '知识库', value: 'Milvus RAG', icon: 'database' },
-  { label: '工具链', value: 'Function Calling', icon: 'tool' },
-  { label: '工作流', value: 'LangGraph', icon: 'brain' },
-];
-
 const campusScenes = ['规章制度问答', '办事流程查询', '校园服务咨询', '知识库溯源'];
+
+const formatFileSize = (size: number) => {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+};
+
+const formatDateTime = (value: string | null) => {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+};
 
 function Icon({ name, className = '' }: { name: IconName; className?: string }) {
   const common = {
@@ -219,6 +273,19 @@ function App() {
   const [createUserError, setCreateUserError] = useState('');
   const [createUserSuccess, setCreateUserSuccess] = useState('');
   const [isCreateUserSubmitting, setIsCreateUserSubmitting] = useState(false);
+  const [isKnowledgeOpen, setIsKnowledgeOpen] = useState(false);
+  const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
+  const [isDocumentsLoading, setIsDocumentsLoading] = useState(false);
+  const [documentsError, setDocumentsError] = useState('');
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadCategory, setUploadCategory] = useState('general');
+  const [uploadAccessLevel, setUploadAccessLevel] = useState<AccessLevel>('public');
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState('');
+  const [isUploadingDocument, setIsUploadingDocument] = useState(false);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -280,11 +347,63 @@ function App() {
     setIsCreateUserOpen(true);
   };
 
+  const loadKnowledgeDocuments = useCallback(async () => {
+    if (currentUser.role !== 'admin' || !authToken) return;
+
+    setIsDocumentsLoading(true);
+    setDocumentsError('');
+
+    try {
+      const response = await fetch('/api/knowledge/documents', {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(errorData?.detail || '加载文档列表失败');
+      }
+
+      const data = await response.json() as KnowledgeDocument[];
+      setDocuments(data);
+    } catch (error) {
+      setDocumentsError(error instanceof Error ? error.message : '加载文档列表失败');
+    } finally {
+      setIsDocumentsLoading(false);
+    }
+  }, [authToken, currentUser.role]);
+
+  useEffect(() => {
+    if (!isKnowledgeOpen || currentUser.role !== 'admin') return;
+
+    const intervalId = window.setInterval(() => {
+      void loadKnowledgeDocuments();
+    }, 4000);
+
+    return () => window.clearInterval(intervalId);
+  }, [currentUser.role, isKnowledgeOpen, loadKnowledgeDocuments]);
+
+  const resetUploadForm = () => {
+    setUploadFile(null);
+    setUploadTitle('');
+    setUploadCategory('general');
+    setUploadAccessLevel('public');
+    setUploadError('');
+    setFileInputKey((key) => key + 1);
+  };
+
+  const openKnowledgeDialog = () => {
+    setIsKnowledgeOpen(true);
+    setUploadError('');
+    setUploadSuccess('');
+    void loadKnowledgeDocuments();
+  };
+
   const handleLogout = () => {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     setAuthToken('');
     setCurrentUser(guestUser);
     setIsCreateUserOpen(false);
+    setIsKnowledgeOpen(false);
   };
 
   const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -363,6 +482,91 @@ function App() {
     }
   };
 
+  const handleUploadDocumentSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!uploadFile || currentUser.role !== 'admin') return;
+
+    setIsUploadingDocument(true);
+    setUploadError('');
+    setUploadSuccess('');
+
+    const formData = new FormData();
+    formData.append('file', uploadFile);
+    if (uploadTitle.trim()) formData.append('title', uploadTitle.trim());
+    formData.append('category', uploadCategory.trim() || 'general');
+    formData.append('access_level', uploadAccessLevel);
+
+    try {
+      const response = await fetch('/api/knowledge/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(errorData?.detail || '上传文档失败');
+      }
+
+      const document = await response.json() as KnowledgeDocument;
+      setUploadSuccess(`已创建处理任务：${document.title}`);
+      resetUploadForm();
+      await loadKnowledgeDocuments();
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : '上传文档失败');
+    } finally {
+      setIsUploadingDocument(false);
+    }
+  };
+
+  const handleDeleteDocument = async (document: KnowledgeDocument) => {
+    if (currentUser.role !== 'admin') return;
+    const confirmed = window.confirm(`确定删除《${document.title}》吗？这会删除源文件和对应的 Milvus 切片。`);
+    if (!confirmed) return;
+
+    setDeletingDocumentId(document.id);
+    setDocumentsError('');
+
+    try {
+      const response = await fetch(`/api/knowledge/documents/${document.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(errorData?.detail || '删除文档失败');
+      }
+
+      await loadKnowledgeDocuments();
+    } catch (error) {
+      setDocumentsError(error instanceof Error ? error.message : '删除文档失败');
+    } finally {
+      setDeletingDocumentId(null);
+    }
+  };
+
+  const appendTraceToLastAssistant = (trace: TraceItem) => {
+    setMessages(prev => {
+      const updated = [...prev];
+      const lastMessage = updated[updated.length - 1];
+      if (!lastMessage || lastMessage.role !== 'assistant') return prev;
+
+      const traces = lastMessage.traces || [];
+      const hasSameTrace = traces.some(item =>
+        item.message === trace.message &&
+        JSON.stringify(item.sources || []) === JSON.stringify(trace.sources || [])
+      );
+      if (hasSameTrace) return prev;
+
+      updated[updated.length - 1] = {
+        ...lastMessage,
+        traces: [...traces, trace],
+      };
+      return updated;
+    });
+  };
+
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return;
 
@@ -381,7 +585,9 @@ function App() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ messages: newMessages }),
+        body: JSON.stringify({
+          messages: newMessages.map(({ role, content }) => ({ role, content })),
+        }),
       });
 
       if (!response.ok) {
@@ -396,7 +602,10 @@ function App() {
       let assistantContent = '';
       let buffer = '';
 
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: '', traces: [{ message: '正在理解问题' }] },
+      ]);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -428,6 +637,12 @@ function App() {
                   return updated;
                 });
               }
+              else if (data.type === 'trace') {
+                appendTraceToLastAssistant({
+                  message: data.message,
+                  sources: data.sources,
+                });
+              }
               else if (data.type === 'tool_start') {
                 const name = data.tool_name === 'simple_calculator' ? '计算器' :
                              data.tool_name === 'get_current_time' ? '时间工具' :
@@ -454,7 +669,15 @@ function App() {
     } catch (error) {
       console.error('Chat error:', error);
       const message = error instanceof Error ? error.message : '请求出错，请检查后端服务是否启动。';
-      setMessages(prev => [...prev, { role: 'assistant', content: message }]);
+      setMessages(prev => {
+        const updated = [...prev];
+        const lastMessage = updated[updated.length - 1];
+        if (lastMessage?.role === 'assistant' && !lastMessage.content) {
+          updated[updated.length - 1] = { ...lastMessage, content: message };
+          return updated;
+        }
+        return [...prev, { role: 'assistant', content: message }];
+      });
     } finally {
       setIsLoading(false);
       setToolStatus(null);
@@ -492,15 +715,26 @@ function App() {
             {currentUser.is_guest ? '登录' : '退出'}
           </button>
           {currentUser.role === 'admin' && (
-            <button
-              type="button"
-              className="admin-button"
-              title="添加平台用户"
-              onClick={openCreateUserDialog}
-            >
-              <Icon name="shield" className="button-icon" />
-              添加用户
-            </button>
+            <>
+              <button
+                type="button"
+                className="admin-button"
+                title="管理知识库文档"
+                onClick={openKnowledgeDialog}
+              >
+                <Icon name="database" className="button-icon" />
+                知识库
+              </button>
+              <button
+                type="button"
+                className="admin-button"
+                title="添加平台用户"
+                onClick={openCreateUserDialog}
+              >
+                <Icon name="shield" className="button-icon" />
+                添加用户
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -522,26 +756,6 @@ function App() {
               <span className="section-kicker">Campus Copilot</span>
               <h2>一个入口处理校园问题</h2>
               <p>把知识检索、规则问答和工具调用收进同一个对话工作流。</p>
-            </div>
-          </section>
-
-          <section className="panel-card">
-            <div className="panel-title">
-              <Icon name="spark" className="panel-title-icon" />
-              运行能力
-            </div>
-            <div className="feature-stack">
-              {features.map(item => (
-                <div className="feature-row" key={item.label}>
-                  <div className="feature-icon">
-                    <Icon name={item.icon} />
-                  </div>
-                  <div>
-                    <span>{item.label}</span>
-                    <strong>{item.value}</strong>
-                  </div>
-                </div>
-              ))}
             </div>
           </section>
 
@@ -650,6 +864,32 @@ function App() {
                       )}
                       <div className="message-content">
                         <div className="message-author">{isUser ? currentUser.display_name : 'Campus AI Assistant'}</div>
+                        {!isUser && msg.traces?.length ? (
+                          <div className="trace-card">
+                            <div className="trace-title">处理过程 / 执行轨迹</div>
+                            <div className="trace-list">
+                              {msg.traces.map((trace, traceIndex) => (
+                                <div className="trace-item" key={`${trace.message}-${traceIndex}`}>
+                                  <div className="trace-line">
+                                    <span>{traceIndex + 1}</span>
+                                    {trace.message}
+                                  </div>
+                                  {trace.sources?.length ? (
+                                    <div className="trace-sources">
+                                      {trace.sources.map((source, sourceIndex) => (
+                                        <div className="trace-source" key={`${source.title}-${source.page}-${sourceIndex}`}>
+                                          <strong>{source.title}</strong>
+                                          <small>分类：{source.category} · 页码：{source.page}</small>
+                                          <p>{source.summary}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                         <div className={`message-bubble ${isUser ? 'plain-content' : 'markdown-content'}`}>
                           {isLastAssistant ? (
                             <span className="typing-dots" aria-label="正在思考">
@@ -757,6 +997,136 @@ function App() {
               </button>
               <p className="auth-hint">开发默认管理员：admin / admin123456</p>
             </form>
+          </section>
+        </div>
+      )}
+
+      {isKnowledgeOpen && currentUser.role === 'admin' && (
+        <div className="auth-overlay" role="presentation" onMouseDown={() => setIsKnowledgeOpen(false)}>
+          <section className="auth-dialog knowledge-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="auth-close" onClick={() => setIsKnowledgeOpen(false)} aria-label="关闭知识库管理窗口">
+              ×
+            </button>
+            <div className="auth-hero">
+              <div className="assistant-avatar">
+                <Icon name="database" />
+              </div>
+              <div>
+                <span className="section-kicker">知识库管理</span>
+                <h2>上传与管理文档</h2>
+                <p>源文件会保存到后端 storage 目录，后台处理完成后写入 Milvus。</p>
+              </div>
+            </div>
+
+            <div className="knowledge-layout">
+              <form className="knowledge-upload" onSubmit={(event) => void handleUploadDocumentSubmit(event)}>
+                <div className="knowledge-section-title">上传文档</div>
+                <label>
+                  文件
+                  <input
+                    key={fileInputKey}
+                    type="file"
+                    accept=".pdf,.docx,.md,.txt"
+                    onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+                    required
+                  />
+                </label>
+                <div className="knowledge-form-grid">
+                  <label>
+                    标题
+                    <input
+                      value={uploadTitle}
+                      onChange={(event) => setUploadTitle(event.target.value)}
+                      placeholder="默认使用文件名"
+                    />
+                  </label>
+                  <label>
+                    分类
+                    <input
+                      value={uploadCategory}
+                      onChange={(event) => setUploadCategory(event.target.value)}
+                      placeholder="general"
+                      required
+                    />
+                  </label>
+                  <label>
+                    权限
+                    <select value={uploadAccessLevel} onChange={(event) => setUploadAccessLevel(event.target.value as AccessLevel)}>
+                      <option value="public">公开</option>
+                      <option value="student">学生</option>
+                      <option value="admin">管理员</option>
+                    </select>
+                  </label>
+                </div>
+
+                {uploadError && <div className="auth-error">{uploadError}</div>}
+                {uploadSuccess && <div className="auth-success">{uploadSuccess}</div>}
+
+                <button className="auth-submit" type="submit" disabled={isUploadingDocument || !uploadFile}>
+                  {isUploadingDocument ? '上传中...' : '上传并处理'}
+                </button>
+              </form>
+
+              <div className="knowledge-documents">
+                <div className="knowledge-list-head">
+                  <div>
+                    <div className="knowledge-section-title">文档列表</div>
+                    <p>{documents.length} 个文档，后台状态会自动刷新</p>
+                  </div>
+                  <button type="button" className="ghost-button" onClick={() => void loadKnowledgeDocuments()} disabled={isDocumentsLoading}>
+                    {isDocumentsLoading ? '刷新中' : '刷新'}
+                  </button>
+                </div>
+
+                {documentsError && <div className="auth-error">{documentsError}</div>}
+
+                <div className="document-list">
+                  {isDocumentsLoading && documents.length === 0 ? (
+                    <div className="empty-documents">正在加载文档...</div>
+                  ) : documents.length === 0 ? (
+                    <div className="empty-documents">还没有上传文档</div>
+                  ) : (
+                    documents.map((document) => (
+                      <article className="document-item" key={document.id}>
+                        <div className="document-main">
+                          <div>
+                            <h3>{document.title}</h3>
+                            <p>{document.original_filename}</p>
+                          </div>
+                          <span className={`status-pill status-${document.status}`}>
+                            {documentStatusLabels[document.status]}
+                          </span>
+                        </div>
+
+                        <div className="document-meta">
+                          <span>{document.category}</span>
+                          <span>{accessLevelLabels[document.access_level]}</span>
+                          <span>{formatFileSize(document.file_size)}</span>
+                          <span>{document.chunk_count} chunks</span>
+                          <span>{formatDateTime(document.created_at)}</span>
+                        </div>
+
+                        {document.error_message && (
+                          <div className="document-error">{document.error_message}</div>
+                        )}
+
+                        <div className="document-actions">
+                          <span>上传人：{document.uploaded_by_username}</span>
+                          <button
+                            type="button"
+                            className="danger-button"
+                            onClick={() => void handleDeleteDocument(document)}
+                            disabled={deletingDocumentId === document.id}
+                          >
+                            {deletingDocumentId === document.id ? '删除中' : '删除'}
+                          </button>
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
           </section>
         </div>
       )}

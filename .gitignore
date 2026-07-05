@@ -3,6 +3,8 @@
 # ========================
 backend/venv/
 backend/.env
+backend/storage/
+backend/temp_uploads/
 **/__pycache__/
 *.pyc
 *.pyo

@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "Campus AI Agent Platform API"
-    app_version: str = "0.9.0"
+    app_version: str = "1.0.0"
 
     openai_api_key: str = ""
     openai_api_base: str = "https://api.littlecold.cn/v1"
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     milvus_uri: str = "http://127.0.0.1:19530"
     milvus_collection: str = "campus_knowledge"
+    knowledge_raw_storage_dir: str = "storage/knowledge/raw"
 
     database_url: str = "postgresql+psycopg://campus_ai:campus_ai_dev_password@127.0.0.1:5432/campus_ai"
 

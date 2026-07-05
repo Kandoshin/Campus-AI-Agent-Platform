@@ -24,6 +24,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
+    from app.models.knowledge_document import KnowledgeDocument
     from app.models.user import User
 
     Base.metadata.create_all(bind=engine)

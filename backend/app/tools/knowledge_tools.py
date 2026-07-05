@@ -76,10 +76,11 @@ def query_campus_knowledge_base(
             # 提取元数据用于溯源
             title = doc.metadata.get("title", "未知文档")
             page = doc.metadata.get("page", "未知页码")
+            category = doc.metadata.get("category", "general")
             access_level = doc.metadata.get("access_level", "unknown")
 
             formatted_results.append(
-                f"[来源 {i + 1}]: 《{title}》第 {page} 页，权限级别: {access_level}\n"
+                f"[来源 {i + 1}]: 《{title}》第 {page} 页，分类: {category}，权限级别: {access_level}\n"
                 f"相关内容: {doc.page_content}\n"
             )
 

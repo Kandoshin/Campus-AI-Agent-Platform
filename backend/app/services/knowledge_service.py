@@ -20,6 +20,13 @@ class KnowledgeService:
         self.milvus_uri = settings.milvus_uri
         self.collection_name = settings.milvus_collection
 
+    def _get_vector_store(self) -> Milvus:
+        return Milvus(
+            embedding_function=self.embeddings,
+            collection_name=self.collection_name,
+            connection_args={"uri": self.milvus_uri},
+        )
+
     def _get_loader(self, file_path: str):
         """根据文件后缀匹配加载器"""
         ext = os.path.splitext(file_path)[1].lower()
@@ -47,6 +54,8 @@ class KnowledgeService:
     def process_and_store(
         self,
         file_path: str,
+        document_id: str | None = None,
+        original_filename: str | None = None,
         title: str | None = None,
         category: str = "general",
         access_level: str = "public",
@@ -55,15 +64,16 @@ class KnowledgeService:
         chunks = self.load_and_split(file_path)
 
         file_name = os.path.basename(file_path)
-        document_id = uuid4().hex
+        stored_document_id = document_id or uuid4().hex
+        source_file = original_filename or file_name
         document_title = title or os.path.splitext(file_name)[0]
 
         for index, chunk in enumerate(chunks):
             page = chunk.metadata.get("page", 0)
             chunk.metadata = {
-                "document_id": document_id,
+                "document_id": stored_document_id,
                 "chunk_index": index,
-                "source_file": file_name,
+                "source_file": source_file,
                 "title": document_title,
                 "page": page,
                 "category": category,
@@ -78,3 +88,7 @@ class KnowledgeService:
             drop_old=False  # 保留原有知识
         )
         return len(chunks)
+
+    def delete_document_chunks(self, document_id: str) -> None:
+        """删除指定文档在 Milvus 中的全部切片"""
+        self._get_vector_store().delete(expr=f'document_id == "{document_id}"')
