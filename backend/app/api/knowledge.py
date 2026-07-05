@@ -3,8 +3,9 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 
+from app.core.auth import CurrentUser, require_admin
 from app.services.knowledge_service import KnowledgeService
 
 router = APIRouter()
@@ -21,6 +22,7 @@ async def upload_document(
     title: str | None = Form(default=None),
     category: str = Form(default="general"),
     access_level: Literal["public", "student", "admin"] = Form(default="public"),
+    current_user: CurrentUser = Depends(require_admin),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="未提供文件名")
@@ -62,4 +64,5 @@ async def upload_document(
         "title": title or Path(original_name).stem,
         "category": category,
         "access_level": access_level,
+        "uploaded_by": current_user.username,
     }

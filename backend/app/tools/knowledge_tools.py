@@ -1,3 +1,4 @@
+from contextvars import ContextVar, Token
 from typing import Literal
 
 from langchain_core.tools import tool
@@ -7,6 +8,7 @@ from app.core.config import settings
 from app.services.zhipu_embeddings import ZhipuEmbeddings
 
 _vector_store = None
+_current_user_role: ContextVar[str] = ContextVar("current_user_role", default="guest")
 
 ROLE_ACCESS_LEVELS = {
     "guest": ["public"],
@@ -41,6 +43,14 @@ def _access_expr(role: str) -> str:
     return f"access_level in [{quoted_levels}]"
 
 
+def set_current_user_role(role: str) -> Token[str]:
+    return _current_user_role.set(role)
+
+
+def reset_current_user_role(token: Token[str]) -> None:
+    _current_user_role.reset(token)
+
+
 @tool
 def query_campus_knowledge_base(
     query: str,
@@ -51,11 +61,12 @@ def query_campus_knowledge_base(
     输入应该是提炼后的核心检索关键词或问题。
     role 用于权限过滤：guest 只能检索 public，student 可检索 public/student，admin 可检索全部。
     """
+    effective_role = _current_user_role.get()
     try:
         docs = _get_vector_store().similarity_search(
             query,
             k=3,
-            expr=_access_expr(role),
+            expr=_access_expr(effective_role),
         )
         if not docs:
             return "知识库中未找到相关内容。"

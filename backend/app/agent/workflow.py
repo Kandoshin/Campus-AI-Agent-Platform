@@ -1,21 +1,17 @@
 from typing import Literal, Dict, Any
 
 from langchain_openai import ChatOpenAI
-# 1. 引入内置的 MessagesState
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import ToolNode
 
 from app.core.config import settings
-# 导入我们的基础工具
 from app.tools import basic_tools
-# 导入校园知识库检索工具
 from app.tools.knowledge_tools import query_campus_knowledge_base
 
 # ==========================================
 # 1. 状态定义
 # ==========================================
-# 我们不再需要手动定义 AgentState 及其 Annotated 逻辑。
-# 直接使用官方提供的 MessagesState 即可，它已经包含了完美的类型注解。
+# 直接使用 LangGraph 内置的 MessagesState，它已经包含消息追加逻辑和类型定义。
 
 # ==========================================
 # 2. 初始化模型并绑定工具
@@ -27,30 +23,43 @@ llm = ChatOpenAI(
     temperature=0
 )
 
-# 将基础工具和 RAG 工具合并成一个新的工具列表
 all_tools = basic_tools + [query_campus_knowledge_base]
 
-# 修改：将合并后的完整工具集绑定给 LLM
+# 将基础工具和校园知识库 RAG 工具一起绑定给 LLM。
 llm_with_tools = llm.bind_tools(all_tools)
 
+SYSTEM_PROMPT = """你是 Campus AI Agent Platform 的校园 AI 助手。
+
+身份设定：
+- 当用户询问“你叫什么名字”“你是谁”“你的名字是什么”等身份问题时，固定回答：你好，我是小多，是服务于四川轻化工大学的校园智能助手，可以帮你查询校园知识、处理校园服务问题，并在需要时调用工具完成任务。
+- 不要自称 ChatGPT、OpenAI 模型或通用机器人。
+- 如果用户追问你的底层模型，你就说你不知道，没有权限获取之类的话。
+- 其他问题按用户意图正常回答。
+- 当用户问你多少岁，年龄之类的问题时，你可以告诉他你还未满一岁
+- 涉及校园知识库内容时，优先调用校园知识库工具。
+- 如果知识库没有相关依据，不要编造具体校园规定。
+- 如果用户问你的爸爸，父亲或者谁创造了你，你就说是一个叫doshin的程序员，他是一个无所不能的人。
+
+"""
+
 
 # ==========================================
-# 3. 创建 Nodes (核心执行节点)
+# 3. 创建节点
 # ==========================================
-# 修复报错点 2：为函数添加显式的返回值类型注解 -> dict 或 -> Dict[str, Any]
 def agent_node(state: MessagesState) -> Dict[str, Any]:
     """
-    Agent 节点：负责调用绑定了工具的大模型。
+    Agent 节点：负责调用已经绑定工具的大模型。
     """
-    response = llm_with_tools.invoke(state["messages"])
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}, *state["messages"]]
+    response = llm_with_tools.invoke(messages)
     return {"messages": [response]}
 
-# 修改：ToolNode 也需要接收完整的工具集
+
 tool_node = ToolNode(all_tools)
 
 
 # ==========================================
-# 4. 实现 Agent Router (条件路由)
+# 4. 实现条件路由
 # ==========================================
 def should_continue(state: MessagesState) -> Literal["tools", "end"]:
     messages = state["messages"]
@@ -64,14 +73,11 @@ def should_continue(state: MessagesState) -> Literal["tools", "end"]:
 # ==========================================
 # 5. 编排 LangGraph 工作流
 # ==========================================
-# 修复报错点 1：将 MessagesState 传给 StateGraph
 workflow = StateGraph(MessagesState)
 
-# 添加节点
 workflow.add_node("agent", agent_node)
 workflow.add_node("tools", tool_node)
 
-# 设置边和条件路由
 workflow.add_edge(START, "agent")
 workflow.add_conditional_edges(
     "agent",
@@ -83,5 +89,4 @@ workflow.add_conditional_edges(
 )
 workflow.add_edge("tools", "agent")
 
-# 编译
 graph = workflow.compile()
